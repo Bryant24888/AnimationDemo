@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AnimationState } from './types';
 import Controls from './components/Controls';
@@ -23,6 +22,7 @@ const App: React.FC = () => {
   const [animationState, setAnimationState] = useState<AnimationState>(AnimationState.Idle);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [typedText, setTypedText] = useState<string>('');
+  const [isThinking, setIsThinking] = useState<boolean>(false);
   
   const contentRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -42,7 +42,11 @@ const App: React.FC = () => {
     setAnimationState(AnimationState.Idle);
     setIsPaused(false);
     setTypedText('');
+    setIsThinking(false);
     if (contentRef.current) contentRef.current.scrollTop = 0;
+    if (highlightRef.current) {
+      highlightRef.current.style.opacity = '0';
+    }
   }, [cleanup]);
 
   useEffect(() => {
@@ -95,47 +99,43 @@ const App: React.FC = () => {
 
 
   const runSearchingAnimation = useCallback(async () => {
-    const elementsToHighlight = ['#sec-hero', '#sec-thumb', '#sec-l1', '#sec-l2', '#sec-l3', '#sec-footer'];
+    const elementsToHighlight = ['#sec-hero', '#sec-thumb', '#sec-l1', '#sec-l2', '#sec-l3', '#sec-sq1', '#sec-sq2', '#sec-gallery', '#sec-footer'];
     const contentEl = contentRef.current;
     const highlightEl = highlightRef.current;
 
     if (!contentEl || !highlightEl) return;
 
-    while (animationStateRef.current === AnimationState.Searching) {
-      for (const selector of elementsToHighlight) {
-        if (animationStateRef.current !== AnimationState.Searching) return;
-        while (isPausedRef.current) await new Promise(res => timeoutIds.current.push(setTimeout(res, 100)));
+    for (const selector of elementsToHighlight) {
+      if (animationStateRef.current !== AnimationState.Searching) return;
+      while (isPausedRef.current) await new Promise(res => timeoutIds.current.push(setTimeout(res, 100)));
 
-        const targetEl = contentEl.querySelector<HTMLElement>(selector);
-        if (targetEl) {
-          const { top, left } = getOffsetRelativeToParent(targetEl, contentEl);
-          const targetScrollY = top - contentEl.clientHeight / 3;
-          smoothScroll(targetScrollY);
-          await new Promise(res => timeoutIds.current.push(setTimeout(res, 800)));
-          
-          Object.assign(highlightEl.style, {
-            left: `${left - 8}px`,
-            top: `${top - 8}px`,
-            width: `${targetEl.offsetWidth + 16}px`,
-            height: `${targetEl.offsetHeight + 16}px`,
-            opacity: '1'
-          });
-          await new Promise(res => timeoutIds.current.push(setTimeout(res, 480)));
-        }
+      const targetEl = contentEl.querySelector<HTMLElement>(selector);
+      if (targetEl) {
+        const { top, left } = getOffsetRelativeToParent(targetEl, contentEl);
+        const targetScrollY = top - contentEl.clientHeight / 3;
+        smoothScroll(targetScrollY);
+        await new Promise(res => timeoutIds.current.push(setTimeout(res, 800)));
+        
+        Object.assign(highlightEl.style, {
+          left: `${left - 8}px`,
+          top: `${top - 8}px`,
+          width: `${targetEl.offsetWidth + 16}px`,
+          height: `${targetEl.offsetHeight + 16}px`,
+          opacity: '1'
+        });
+        await new Promise(res => timeoutIds.current.push(setTimeout(res, 480)));
       }
+    }
 
-      if (animationStateRef.current === AnimationState.Searching) {
-        highlightEl.style.opacity = '0';
-        smoothScroll(0);
-        await new Promise(res => timeoutIds.current.push(setTimeout(res, 1400)));
-      }
+    if (animationStateRef.current === AnimationState.Searching) {
+      setIsThinking(true);
     }
   }, [smoothScroll]);
   
   useEffect(() => {
     const handleStateChange = async () => {
       if (animationState === AnimationState.PoppingUp) {
-        await new Promise(res => timeoutIds.current.push(setTimeout(res, 600)));
+        await new Promise(res => timeoutIds.current.push(setTimeout(res, 1100)));
         if(animationStateRef.current === AnimationState.PoppingUp) setAnimationState(AnimationState.FadingInContent);
       } else if (animationState === AnimationState.FadingInContent) {
         await new Promise(res => timeoutIds.current.push(setTimeout(res, 400)));
@@ -155,8 +155,24 @@ const App: React.FC = () => {
   };
 
   const handlePause = () => setIsPaused(p => !p);
-  const handleSuccess = () => (animationState > AnimationState.FadingInContent && animationState < AnimationState.Success) && setAnimationState(AnimationState.Success);
-  const handleFail = () => (animationState > AnimationState.FadingInContent && animationState < AnimationState.Success) && setAnimationState(AnimationState.Fail);
+  
+  const isPlaying = animationState > AnimationState.Idle && animationState < AnimationState.Success;
+  
+  const handleSuccess = () => {
+    if (isPlaying) {
+      cleanup();
+      setIsThinking(false);
+      setAnimationState(AnimationState.Success);
+    }
+  };
+
+  const handleFail = () => {
+    if (isPlaying) {
+      cleanup();
+      setIsThinking(false);
+      setAnimationState(AnimationState.Fail);
+    }
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 md:p-8 font-sans text-slate-200">
@@ -167,18 +183,19 @@ const App: React.FC = () => {
           onSuccess={handleSuccess}
           onFail={handleFail}
           isPaused={isPaused}
-          isPlaying={animationState > AnimationState.Idle && animationState < AnimationState.Success}
+          isPlaying={isPlaying}
+          canTriggerResult={isPlaying || isThinking}
         />
         <div className="relative w-full h-[75vh] min-h-[680px] mt-4 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
-           {animationState < AnimationState.Success ? (
-              <BrowserWindow
-                  state={animationState}
-                  typedText={typedText}
-                  contentRef={contentRef}
-                  highlightRef={highlightRef}
-              />
-            ) : (
-               <ResultScene variant={animationState === AnimationState.Success ? 'success' : 'fail'} />
+            <BrowserWindow
+                state={animationState}
+                typedText={typedText}
+                contentRef={contentRef}
+                highlightRef={highlightRef}
+                isThinking={isThinking}
+            />
+            {(animationState === AnimationState.Success || animationState === AnimationState.Fail) && (
+                <ResultScene variant={animationState === AnimationState.Success ? 'success' : 'fail'} />
             )}
         </div>
       </div>
